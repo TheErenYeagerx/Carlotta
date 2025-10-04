@@ -1,0 +1,9 @@
+pyrofork
+Tgcrypto
+pymongo[srv]
+aiohttp
+Flask
+gunicorn
+Jinja2
+Werkzeug
+itsdangerous
