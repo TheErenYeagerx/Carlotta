@@ -14,6 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      pull-requests: write
 
     steps:
       - name: Checkout repository
@@ -27,16 +28,16 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Install pip
-        run: pip install --upgrade pip
+      - name: Upgrade pip
+        run: pip install --upgrade pip packaging
 
       - name: Update requirements.txt
         id: update
         run: |
-          python <<EOF
-          import json
-          import subprocess
+          python <<'EOF'
+          import json, subprocess
           from pathlib import Path
+          from packaging.version import parse as vparse
 
           reqs = Path("requirements.txt")
 
@@ -44,57 +45,81 @@ jobs:
               ["pip", "list", "--outdated", "--format", "json"],
               capture_output=True, text=True, check=True
           )
-          outdated = {p["name"].lower(): p["latest_version"] for p in json.loads(result.stdout)}
+          outdated = {p["name"].lower(): (p["version"], p["latest_version"]) for p in json.loads(result.stdout)}
 
           changed = 0
+          major_updates = []
           lines = reqs.read_text().splitlines()
           new_lines = []
+
           for line in lines:
-              if not line.strip() or line.strip().startswith("#"):
+              if not line.strip() or line.startswith("#"):
                   new_lines.append(line)
                   continue
 
-              pkg = line.strip().split("==")[0].lower()
+              pkg = line.split("==")[0].strip().lower()
               if pkg in outdated:
-                  latest = outdated[pkg]
+                  current, latest = outdated[pkg]
+                  old_v, new_v = vparse(current), vparse(latest)
                   new_line = f"{pkg}=={latest}"
-                  if new_line != line:
+
+                  if new_v.major > old_v.major:
+                      major_updates.append(f"{pkg}: {current} → {latest}")
+                  elif new_line != line:
                       new_lines.append(new_line)
                       changed += 1
-                  else:
-                      new_lines.append(line)
-              else:
-                  new_lines.append(line)
+                      continue
+
+              new_lines.append(line)
 
           if changed:
               reqs.write_text("\n".join(new_lines) + "\n")
 
-          title = "Update dependencies" if not changed else f"Update dependencies [{changed} packages]"
-          with open("/tmp/title.txt", "w") as f:
-              f.write(title)
+          Path("/tmp/title.txt").write_text(
+              "Update dependencies" if not changed else f"Update dependencies [{changed} package{'s' if changed > 1 else ''}]"
+          )
+
+          Path("/tmp/major.txt").write_text("\n".join(major_updates))
+          print(f"::set-output name=changed::{changed}")
+          print(f"::set-output name=has_major::{bool(major_updates)}")
           EOF
 
           echo "title=$(cat /tmp/title.txt)" >> $GITHUB_OUTPUT
           echo "date=$(date +%Y%m%d)" >> $GITHUB_OUTPUT
+          echo "major=$(cat /tmp/major.txt)" >> $GITHUB_OUTPUT
           echo "diff<<EOF" >> $GITHUB_OUTPUT
           git diff -U0 requirements.txt | grep '^[+-][^+-]' >> $GITHUB_OUTPUT || true
           echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Configure Git for push
+        if: steps.update.outputs.changed != '0'
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git remote set-url origin https://x-access-token:${{ secrets.GH_PAT }}@github.com/${{ github.repository }}
 
-      - name: Create Pull Request
+      - name: Commit and Push changes
+        if: steps.update.outputs.changed != '0' && steps.update.outputs.has_major == 'False'
+        run: |
+          git add requirements.txt
+          git commit -m "${{ steps.update.outputs.title }}"
+          git push origin main
+
+      - name: Create Pull Request for major updates
+        if: steps.update.outputs.has_major == 'True'
         uses: peter-evans/create-pull-request@v7
         with:
           token: ${{ secrets.GH_PAT }}
           commit-message: ${{ steps.update.outputs.title }}
-          title: ${{ steps.update.outputs.title }}
+          title: ⚠️ Major dependency updates
           body: |
-            Updated dependencies:
+            Major updates detected that need manual review:
 
+            ```
+            ${{ steps.update.outputs.major }}
+            ```
+
+            Diff:
             ```diff
             ${{ steps.update.outputs.diff }}
             ```
