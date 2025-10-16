@@ -5,11 +5,9 @@ from pyrogram.types import Message, InlineKeyboardButton, InlineKeyboardMarkup, 
 from database import add_user, add_group, all_users, all_groups, users, remove_user
 from configs import cfg
 
-# Logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Bot
 app = Client(
     "approver",
     api_id=cfg.API_ID,
@@ -17,19 +15,20 @@ app = Client(
     bot_token=cfg.BOT_TOKEN
 )
 
-# Main keyboard
 def main_keyboard():
     return InlineKeyboardMarkup(
         [
             [
-                InlineKeyboardButton("Channel", url=cfg.CHANNEL_URL),
-                InlineKeyboardButton("Support", url=cfg.SUPPORT_URL),
+                InlineKeyboardButton("📢 Channel", url=cfg.CHANNEL_URL),
+                InlineKeyboardButton("🛠 Support", url=cfg.SUPPORT_URL)
+            ],
+            [
+                InlineKeyboardButton("➕ Add Me", url=f"https://t.me/{cfg.BOT_USERNAME}?startgroup=true"),
+                InlineKeyboardButton("❓ Help", callback_data="help_main")
             ]
         ]
     )
 
-
-# --- Auto-approve join requests ---
 @app.on_chat_join_request()
 async def approve(_, m):
     chat = m.chat
@@ -40,7 +39,7 @@ async def approve(_, m):
         await app.send_message(
             user.id,
             f"Hello {user.mention}, welcome to {chat.title}!\n\n"
-            f"You have been auto-approved.\n\nPowered by: @RadhaSprt.",
+            "You have been auto-approved.\n\nPowered by: @RadhaSprt.",
         )
         add_user(user.id)
     except errors.PeerIdInvalid:
@@ -48,8 +47,6 @@ async def approve(_, m):
     except Exception as err:
         logger.error(f"Error in approve: {err}", exc_info=True)
 
-
-# --- /start command ---
 @app.on_message(filters.private & filters.command("start"))
 async def start(_, m: Message):
     try:
@@ -65,13 +62,13 @@ async def start(_, m: Message):
             [
                 [
                     InlineKeyboardButton("Join Channel", url=invite_link.invite_link),
-                    InlineKeyboardButton("Check Again", callback_data="chk"),
+                    InlineKeyboardButton("Check Again", callback_data="chk")
                 ]
             ]
         )
         await m.reply(
             "Access Denied! Please join my update channel and click 'Check Again' to confirm.",
-            reply_markup=keyboard,
+            reply_markup=keyboard
         )
         return
 
@@ -79,16 +76,15 @@ async def start(_, m: Message):
     await m.reply_photo(
         cfg.START_IMG,
         caption=(
-            f"Hello {m.from_user.mention}, I am your auto-approve bot!\n"
-            "Add me as admin with 'add members' permission in your group/channel, "
-            "and I'll approve join requests automatically.\n\n"
-            f"Powered by: @RadhaSprt."
+            f"👋 Hello {m.from_user.mention}!\n"
+            "I am your auto-approve bot.\n\n"
+            "Add me as admin with 'add members' permission in your group or channel, "
+            "and I will automatically approve join requests.\n\n"
+            "Powered by: @RadhaSprt."
         ),
-        reply_markup=main_keyboard(),
+        reply_markup=main_keyboard()
     )
 
-
-# --- Callback for channel re-check ---
 @app.on_callback_query(filters.regex("chk"))
 async def check_channel(_, cb: CallbackQuery):
     try:
@@ -96,23 +92,72 @@ async def check_channel(_, cb: CallbackQuery):
     except Exception:
         await cb.answer(
             "You are not joined in the channel. Please join and check again.",
-            show_alert=True,
+            show_alert=True
         )
         return
 
     add_user(cb.from_user.id)
-    await cb.edit_message_caption(
-        caption=(
-            f"Hello {cb.from_user.mention}, I'm your auto-approve bot!\n"
-            "Add me as admin with 'add members' permission in your group/channel, "
-            "and I'll approve join requests automatically.\n\n"
-            f"Powered by: @RadhaSprt."
-        ),
-        reply_markup=main_keyboard(),
+    try:
+        await cb.edit_message_caption(
+            caption=(
+                f"👋 Hello {cb.from_user.mention}!\n"
+                "I am your auto-approve bot.\n\n"
+                "Add me as admin with 'add members' permission in your group or channel, "
+                "and I will automatically approve join requests.\n\n"
+                "Powered by: @RadhaSprt."
+            ),
+            reply_markup=main_keyboard()
+        )
+    except Exception:
+        await cb.message.edit_text(
+            f"👋 Hello {cb.from_user.mention}!\n"
+            "I am your auto-approve bot.\n\n"
+            "Add me as admin with 'add members' permission in your group or channel, "
+            "and I will automatically approve join requests.\n\n"
+            "Powered by: @RadhaSprt.",
+            reply_markup=main_keyboard()
+        )
+
+HELP_TEXTS = {
+    "bcast": "📣 /bcast\nReply to a message to broadcast it to all users.",
+    "fcast": "📤 /fcast\nReply to a message to forward it to all users.",
+    "users": "👥 /users\nShows the total number of users and groups (SUDO only).",
+    "start": "👋 /start\nStart the bot and check channel access."
+}
+
+@app.on_callback_query(filters.regex("help_main"))
+async def help_main(_, cb: CallbackQuery):
+    keyboard = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("📣 Broadcast", callback_data="help_bcast"),
+            InlineKeyboardButton("📤 Forward", callback_data="help_fcast")
+        ],
+        [
+            InlineKeyboardButton("👥 Users", callback_data="help_users"),
+            InlineKeyboardButton("👋 Start", callback_data="help_start")
+        ],
+        [
+            InlineKeyboardButton("🏠 Back", callback_data="help_main")
+        ]
+    ])
+    await cb.answer()
+    await cb.message.edit_text(
+        "❓ **Help Menu**\n\nSelect a command to view its details:",
+        reply_markup=keyboard
     )
 
+@app.on_callback_query(filters.regex(r"help_(.*)"))
+async def show_command_help(_, cb: CallbackQuery):
+    cmd = cb.data.split("_")[1]
+    text = HELP_TEXTS.get(cmd, "No info available for this command.")
+    keyboard = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("⬅ Back", callback_data="help_main")
+        ]
+    ])
+    await cb.answer()
+    await cb.message.edit_text(f"**{cmd.upper()} Command**\n\n{text}", reply_markup=keyboard)
 
-# --- /users stats ---
 @app.on_message(filters.command("users") & filters.user(cfg.SUDO))
 async def show_stats(_, m: Message):
     try:
@@ -124,84 +169,48 @@ async def show_stats(_, m: Message):
     except Exception as e:
         await m.reply_text(f"Error fetching stats: {e}")
 
-
-# --- Parallel Broadcast ---
 BATCH_SIZE = 100
 WORKERS = 10
 BATCH_DELAY = 1
-
-
-async def broadcast_message(message, action="copy"):
-    cursor = users.find({}, {"user_id": 1})
-    user_ids = [int(doc["user_id"]) for doc in cursor]
-
-    queues = [asyncio.Queue() for _ in range(WORKERS)]
-    for i, user_id in enumerate(user_ids):
-        queues[i % WORKERS].put_nowait(user_id)
-
-    tasks = [asyncio.create_task(worker(message, q, action)) for q in queues]
-    results = await asyncio.gather(*tasks)
-
-    success = sum(r["success"] for r in results)
-    failed = sum(r["failed"] for r in results)
-    blocked = sum(r["blocked"] for r in results)
-    deactivated = sum(r["deactivated"] for r in results)
-
-    return success, failed, blocked, deactivated
-
-
-async def worker(message, queue, action="copy"):
-    success = failed = blocked = deactivated = 0
-    while not queue.empty():
-        batch = []
-        for _ in range(min(BATCH_SIZE, queue.qsize())):
-            batch.append(queue.get_nowait())
-
-        tasks = [send_message(message, uid, action) for uid in batch]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-
-        for r in results:
-            if r == "success":
-                success += 1
-            elif r == "blocked":
-                blocked += 1
-            elif r == "deactivated":
-                deactivated += 1
-            else:
-                failed += 1
-
-        await asyncio.sleep(BATCH_DELAY)
-
-    return {
-        "success": success,
-        "failed": failed,
-        "blocked": blocked,
-        "deactivated": deactivated,
-    }
-
+semaphore = asyncio.Semaphore(WORKERS)
 
 async def send_message(message, user_id, action="copy"):
-    try:
-        if action == "copy":
-            await message.copy(user_id)
+    while True:
+        try:
+            if action == "copy":
+                await message.copy(user_id)
+            else:
+                await message.forward(user_id)
+            return "success"
+        except errors.FloodWait as e:
+            await asyncio.sleep(e.value)
+        except errors.InputUserDeactivated:
+            remove_user(user_id)
+            return "deactivated"
+        except errors.UserIsBlocked:
+            remove_user(user_id)
+            return "blocked"
+        except Exception as e:
+            logger.error(f"Broadcast error to {user_id}: {e}", exc_info=True)
+            return "failed"
+
+async def broadcast_message(message, action="copy"):
+    success = failed = blocked = deactivated = 0
+    async for doc in users.find({}, {"user_id": 1}):
+        user_id = int(doc["user_id"])
+        async with semaphore:
+            result = await send_message(message, user_id, action)
+        if result == "success":
+            success += 1
+        elif result == "blocked":
+            blocked += 1
+        elif result == "deactivated":
+            deactivated += 1
         else:
-            await message.forward(user_id)
-        return "success"
-    except errors.FloodWait as e:
-        await asyncio.sleep(e.value)
-        return await send_message(message, user_id, action)
-    except errors.InputUserDeactivated:
-        remove_user(user_id)
-        return "deactivated"
-    except errors.UserIsBlocked:
-        remove_user(user_id)
-        return "blocked"
-    except Exception as e:
-        logger.error(f"Broadcast error to {user_id}: {e}", exc_info=True)
-        return "failed"
+            failed += 1
+        await asyncio.sleep(BATCH_DELAY)
+    return success, failed, blocked, deactivated
 
-
-# --- /bcast ---
 @app.on_message(filters.command("bcast") & filters.user(cfg.SUDO))
 async def bcast_handler(_, m: Message):
     if not m.reply_to_message:
@@ -214,8 +223,6 @@ async def bcast_handler(_, m: Message):
         f"✅ Success: {success}\n🚫 Blocked: {blocked}\n🗑️ Deactivated: {deactivated}\n❌ Failed: {failed}"
     )
 
-
-# --- /fcast ---
 @app.on_message(filters.command("fcast") & filters.user(cfg.SUDO))
 async def fcast_handler(_, m: Message):
     if not m.reply_to_message:
@@ -228,7 +235,5 @@ async def fcast_handler(_, m: Message):
         f"✅ Success: {success}\n🚫 Blocked: {blocked}\n🗑️ Deactivated: {deactivated}\n❌ Failed: {failed}"
     )
 
-
-# --- Run Bot ---
 print("Bot is running...")
 app.run()
